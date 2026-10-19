@@ -1,5 +1,4 @@
 import * as http from "http"
-import findFreePorts from "find-free-ports"
 import Server from "./Server.js"
 import DatabaseFactory from "./DatabaseFactory.js"
 import Utils from "./Util.js"
@@ -38,16 +37,12 @@ export default class ServerFactory {
         configuration = configuration_
         DatabaseFactory.createDatabases(configuration)
 
-        let freeports = await findFreePorts(configuration.NoServers);
-
-        for (let i = 0; i < freeports.length; i++) {
-            let port = freeports[i]
+        for (let i = 0; i < configuration.NoServers; i++) {
+            let port
+            let server
 
             let maxSessions = Utils.getRandomInt(configuration.MinNoSessionsPerServer, configuration.MaxNoSessionsPerServer)
             let processTime = Utils.getRandomInt(configuration.MinProcessingTime, configuration.MaxProcessingTime) 
-
-            let server = new Server(`S${i}`,`http://${host}:${port}`, maxSessions, processTime)
-            this.servers.set(`S${i}`, server)
 
             let httpserver = http.createServer(
                 async function (req, res) {
@@ -81,9 +76,18 @@ export default class ServerFactory {
 
                 }
             );
-            httpserver.listen(port, host, () => {
-                console.log(server)
+            // Let the OS allocate and bind an available port, avoiding reserved ports.
+            await new Promise((resolve, reject) => {
+                httpserver.once('error', reject)
+                httpserver.listen(0, host, () => {
+                    httpserver.removeListener('error', reject)
+                    resolve()
+                })
             });
+            port = httpserver.address().port
+            server = new Server(`S${i}`, `http://${host}:${port}`, maxSessions, processTime)
+            this.servers.set(`S${i}`, server)
+            console.log(server)
 
             // show servers and database status every 4 seconds
             setInterval(() => {
