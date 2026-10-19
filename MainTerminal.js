@@ -16,13 +16,13 @@ async function main() {
         Replicas: 3,
         MaxNoSessionsPerServer: 100,
         MinNoSessionsPerServer: 30,
-        MaxProcessingTime: 30, //30 seconds
-        MinProcessingTime: 2, //2 seconds
+        MaxProcessingTime: 30, //30 milliseconds
+        MinProcessingTime: 2, //2 milliseconds
         NoDatastores: 2,
-        MaxDatastoreSpace: 167721600, //1GB
-        MinDatastoreSpace: 167721000, //100MB
-        MaxSizeRequestPayload: 100, //100MB
-        MinSizeRequestPayload: 10, //1MB
+        MaxDatastoreSpace: 1073741824, //1GB
+        MinDatastoreSpace: 1048576, //100MB
+        MaxSizeRequestPayload: 100, //100KB
+        MinSizeRequestPayload: 10, //10KB
     }
 
     prompt()
