@@ -19,15 +19,24 @@ export default class ServerFactory {
         return this.servers.get(`${index}`).name
     }
 
+    isServerHealthy(name){
+        const server = this.servers.get(name)
+        return server ? server.isHealthy() : false
+    }
+
+    getHealthyServers(){
+        return [...this.servers.values()].filter(server => server.isHealthy())
+    }
+
     getServerWithMinConnectionsIndex(){
-        let iterator1 = this.servers.keys();
-        let minkey = iterator1.next().value
-        let minsessions = this.servers.get(minkey).getNoSessions()
+        let minkey = undefined
+        let minsessions = Infinity
 
         for (let [key, server] of this.servers) {
-            if(server.getNoSessions() < minsessions){
+            if (!server.isHealthy()) continue
+            if (server.getNoSessions() < minsessions){
                 minkey = key
-                minsessions = server.getNoSessions() 
+                minsessions = server.getNoSessions()
             }
         }
         return minkey
@@ -52,10 +61,28 @@ export default class ServerFactory {
                             res.writeHead(200);
                             res.end(`Server ${i} is running on http://${host}:${port}`);
                             break
+                        case "/health":
+                            if (!server.isFailed()) {
+                                res.writeHead(200);
+                                res.end(JSON.stringify({ status: "UP" }));
+                            } else {
+                                res.writeHead(503);
+                                res.end(JSON.stringify({ status: "DOWN" }));
+                            }
+                            break
                         default:
+                            if (server.isFailed()) {
+                                res.writeHead(503);
+                                res.end(`Session ACCESS DENIED on http://${host}:${port} - server unavailable`);
+                                break;
+                            }
                             res.writeHead(200);
-                           
-                            let requestPayloadRange = Utils.getRandomInt(configuration.MinSizeRequestPayload, configuration.MaxSizeRequestPayload) //random between 1MB and 100MB
+
+                            // Use the client-supplied payload size when present (for size-limit defence tests).
+                            const sizeParam = new URL(req.url, `http://${host}:${port}`).searchParams.get('size')
+                            let requestPayloadRange = sizeParam !== null
+                                ? Number(sizeParam)
+                                : Utils.getRandomInt(configuration.MinSizeRequestPayload, configuration.MaxSizeRequestPayload) //random payload if not supplied
                             let saved = await  DatabaseFactory.savePayloadToDatastore(requestPayloadRange)
                             if(saved){
                                 let ip = req.connection.remoteAddress

@@ -3,6 +3,9 @@ import crypto from "crypto"
 
 import ServerFactory from "./ServerFactory.js"
 import Utils from "./Util.js"
+import HealthChecker from "./HealthChecker.js"
+import FaultInjector from "./FaultInjector.js"
+import RateLimiter from "./RateLimiter.js"
 // import RoundRobin from "./RoundRobin.js"
 // import LeastConnections from "./LeastConnections.js"
 // import ConsistentHashing from "./ConsistentHashing.js"
@@ -13,6 +16,9 @@ const port = 8080
 var configuration = undefined
 var serverFactory = undefined
 var loadBalancingAlgorithm = undefined
+var healthChecker = undefined
+var faultInjector = undefined
+var rateLimiter = undefined
 
 
 export default class LoadBalancer {
@@ -30,6 +36,8 @@ export default class LoadBalancer {
             loadBalancingAlgorithm = new ConsistentHashing(configuration.NoServers, configuration.Replicas)
         }
 
+        rateLimiter = new RateLimiter(configuration)
+
         let httpserver = http.createServer(
             async function (req, res) {
                 res.setHeader("Content-Type", "application/json");
@@ -38,14 +46,37 @@ export default class LoadBalancer {
                         res.writeHead(200);
                         res.end(`LoadBalancer is running on http://${host}:${port}/\n\nTo make a session request - http://${host}:${port}/[request]`);
                         break
-                    default:
-                        res.writeHead(200);
+                    default: {
+                        const parsedUrl = new URL(req.url, `http://${host}:${port}`)
+                        const sizeParam = parsedUrl.searchParams.get('size')
+                        const requestSize = sizeParam !== null ? Number(sizeParam) : undefined
+
+                        // Defences against abusive traffic (disable for the no-defence baseline).
+                        if (configuration.Defences?.enabled) {
+                            const ip = req.socket.remoteAddress ?? 'unknown'
+                            if (!rateLimiter.isAllowed(ip)) {
+                                res.writeHead(429);
+                                res.end(`Session ACCESS DENIED - rate limit exceeded`);
+                                break;
+                            }
+                            if (requestSize !== undefined && requestSize > configuration.Defences.maxPayloadSize) {
+                                res.writeHead(413);
+                                res.end(`Session ACCESS DENIED - payload size ${requestSize} exceeds limit ${configuration.Defences.maxPayloadSize}`);
+                                break;
+                            }
+                        }
 
                         let serverindex = loadBalancingAlgorithm.getNext(req.url)
+                        if (serverindex === undefined) {
+                            res.writeHead(503);
+                            res.end(`Session ACCESS DENIED - no healthy server available`);
+                            break;
+                        }
                         let nextInLineServer = serverFactory.getServerName(serverindex)
 
-                        //route load to next legitimate server
-                        http.get(`${nextInLineServer}/start`, resp => {
+                        const backendPath = sizeParam !== null ? `/start?size=${sizeParam}` : '/start'
+                        //route load to next legitimate server, failing fast if it is down or too slow
+                        const backendReq = http.get(`${nextInLineServer}${backendPath}`, resp => {
                             let data = ''
                             resp.on('data', chunk => {
                                 data += chunk
@@ -53,8 +84,28 @@ export default class LoadBalancer {
                             resp.on('end', () => {
                                 res.end(data);
                             })
+                            resp.on('error', () => {
+                                if (!res.headersSent) {
+                                    res.writeHead(503);
+                                    res.end(`Session ACCESS DENIED - backend error`);
+                                }
+                            })
+                        })
+                        backendReq.on('error', () => {
+                            if (!res.headersSent) {
+                                res.writeHead(503);
+                                res.end(`Session ACCESS DENIED - backend unreachable`);
+                            }
+                        })
+                        backendReq.setTimeout(configuration.BackendTimeoutMs ?? 5000, () => {
+                            backendReq.destroy()
+                            if (!res.headersSent) {
+                                res.writeHead(504);
+                                res.end(`Session ACCESS DENIED - backend timeout`);
+                            }
                         })
                         break
+                    }
                 }
             }
         );
@@ -63,6 +114,11 @@ export default class LoadBalancer {
 
             serverFactory = new ServerFactory()
             serverFactory.createServers(configuration)
+
+            healthChecker = new HealthChecker(serverFactory, configuration)
+            healthChecker.start()
+            faultInjector = new FaultInjector(serverFactory, configuration)
+            faultInjector.start()
         });
 
     }
@@ -87,12 +143,17 @@ class RoundRobin {
     }
 
     getNext() {
-        this.next = this.next + 1
-
-        if (this.next >= this.max) {
-            this.next = 0
+        for (let i = 0; i < this.max; i++) {
+            this.next = this.next + 1
+            if (this.next >= this.max) {
+                this.next = 0
+            }
+            const name = `S${this.next}`
+            if (serverFactory.isServerHealthy(name)) {
+                return name
+            }
         }
-        return `S${this.next}`
+        return undefined
     }
 }
 
@@ -128,7 +189,7 @@ class ConsistentHashing {
         let serverid = undefined
         //sort by hashkeys
         const hashmap_sorted = new Map([...this.hashmap.entries()].sort((a, b) => a[1].localeCompare(b[1])));
-        
+
         let rfound = false
         for (let [key, value] of hashmap_sorted) {
             if(key === requestid){
@@ -137,18 +198,22 @@ class ConsistentHashing {
 
             if(rfound){
                 if(key.startsWith("__S")){
-                    serverid = removeN(key,2)
+                    let candidate = removeN(key,2)
                     if(this.noservers < 10){
-                        serverid = serverid.substring(0, 2);
+                        candidate = candidate.substring(0, 2);
                     }
                     else if(this.noservers <100){
-                        serverid = serverid.substring(0, 3);
+                        candidate = candidate.substring(0, 3);
                     }
                     else if(this.noservers <1000){
-                        serverid = serverid.substring(0, 4);
+                        candidate = candidate.substring(0, 4);
                     }//max of 999 servers
 
-                    break
+                    // Skip unhealthy servers and keep walking the ring.
+                    if (serverFactory.isServerHealthy(candidate)) {
+                        serverid = candidate
+                        break
+                    }
                 }
             }
         }

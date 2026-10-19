@@ -12,7 +12,7 @@ async function main() {
 
     config = {
         LoadBalancingAlgorithm: Utils.AlgorithmStr[1],
-        NoServers: 10,
+        NoServers: 2, // 只宕 S0，请求会被绕到其余 9 台，想看到「丢失请求」就把 NoServers 调小
         Replicas: 3,
         MaxNoSessionsPerServer: 100,
         MinNoSessionsPerServer: 30,
@@ -23,6 +23,10 @@ async function main() {
         MinDatastoreSpace: 1048576, //100MB
         MaxSizeRequestPayload: 100, //100KB
         MinSizeRequestPayload: 10, //10KB
+        FaultInjection: { enabled: true, serverId: "S0", failAfterMs: 10000, downDurationMs: 8000 },
+        HealthCheck: { intervalMs: 1000 },
+        BackendTimeoutMs: 5000,
+        Defences: { enabled: false, maxPayloadSize: 100, rateLimitWindowMs: 1000, rateLimitMaxRequests: 100 },
     }
 
     prompt()
