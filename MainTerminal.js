@@ -12,7 +12,7 @@ async function main() {
 
     config = {
         LoadBalancingAlgorithm: Utils.AlgorithmStr[1],
-        NoServers: 2, // 只宕 S0，请求会被绕到其余 9 台，想看到「丢失请求」就把 NoServers 调小
+        NoServers: 2, // only S0 is taken down, so requests reroute to the remaining server; lower NoServers to make "lost requests" visible
         Replicas: 3,
         MaxNoSessionsPerServer: 100,
         MinNoSessionsPerServer: 30,
