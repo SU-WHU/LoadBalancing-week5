@@ -5,6 +5,8 @@ export default class Server {
         this.maxSessions = maxSessions
         this.processTime = processTime
         this.sessions = []
+        this.healthy = true
+        this.failed = false
 
         setInterval(() => {
             this.maintainSessions()
@@ -19,6 +21,22 @@ export default class Server {
         return this.sessions.length
     }
 
+    isHealthy() {
+        return this.healthy
+    }
+
+    setHealthy(value) {
+        this.healthy = value
+    }
+
+    isFailed() {
+        return this.failed
+    }
+
+    setFailed(value) {
+        this.failed = value
+    }
+
     limitReached() {
         if (this.getNoSessions() >= this.maxSessions) {
             return true
@@ -30,16 +48,16 @@ export default class Server {
 
     async addSession(ipaddress){
         return new Promise(async (resolve, reject) => {
-            if(this.sessions.length <= this.maxSessions){
+            if(this.sessions.length < this.maxSessions){
                 let session = new Session(ipaddress, this.processTime)
                 this.sessions.push(session)
-    
+
                 resolve(true)
             }
             else{
                 resolve(false)
-            } 
-        })              
+            }
+        })
     }
 
     maintainSessions(){
@@ -52,9 +70,9 @@ export default class Server {
                 toremove.push(i)
             }
         }
-        for(var i=0;i<toremove.length;i++){
-            let rindex = toremove[i]
-            this.sessions.splice(rindex, 1)
+        // Remove from the end first so earlier removals do not shift later indices.
+        for(var i=toremove.length-1;i>=0;i--){
+            this.sessions.splice(toremove[i], 1)
         }
     }
 
@@ -65,7 +83,9 @@ export default class Server {
             "MaxSessions":`${this.maxSessions}`,
             "processTime":`${this.processTime}`,
             "Active":this.getNoSessions(),
-            "limitReached": `${this.limitReached()}`
+            "limitReached": `${this.limitReached()}`,
+            "Healthy": `${this.healthy}`,
+            "Failed": `${this.failed}`
         }
     }
 }

@@ -48,3 +48,23 @@ The configuration has the following shape:
 The testbed evaluates three load-balancing algorithms. These are `Round Robin`, `Least Connections` and `Consistent Hashing`. Given an configuration instance, the aim is to verify the limits of the system in its ability to be highly-available, resilient and to withstand a denial of service attack. 
 
 The effectiveness of a configuration is measured by the frequency of server denial of access either due to lack of servers to handle new sessions or not enough space in the datastore to handle user request payload.
+
+## Fault Tolerance (Task B1)
+
+- `HealthChecker.js` probes each backend server's `/health` endpoint every `HealthCheck.intervalMs` and updates its `healthy` flag (the routing view). Transitions are logged as `[HEALTH] <server> UP/DOWN @ <ms>`.
+- `FaultInjector.js` simulates a backend crash/recovery: after `FaultInjection.failAfterMs` it marks one server `failed` (the `/health` endpoint then returns 503), and after `FaultInjection.downDurationMs` it restores it. Logged as `[FAULT] <server> DOWN/UP`.
+- The load balancer only routes to healthy servers (Round Robin / Least Connections / Consistent Hashing all skip unhealthy ones). If none are healthy it returns HTTP 503; a failed or slow backend call is answered with 503 (error) or 504 (timeout, `BackendTimeoutMs`).
+
+Run `node MainTerminal.js` and choose `Y`, then in another terminal run `node RequestSimulation.js`. Compare a run with `FaultInjection.enabled: true` against one with `false` to measure lost requests and recovery time.
+
+## Defences Against Abusive Traffic (Task B2)
+
+See `THREAT_MODEL.md` for the threat model. Defences are gated by `Defences.enabled` and implemented in `LoadBalancer.js`:
+
+- **Request-size limit** — `Defences.maxPayloadSize` rejects a client-supplied `?size=` over the limit with HTTP 413.
+- **Rate limiting** — `RateLimiter.js` enforces `Defences.rateLimitMaxRequests` per `Defences.rateLimitWindowMs` per client IP, answering HTTP 429.
+- **Backend timeout** — `BackendTimeoutMs` aborts a stuck backend call with HTTP 504.
+
+A client can pass its payload size as `GET /request?size=<bytes>`; otherwise the server uses a random payload size as before.
+
+Run the mixed workload with `node AbuseSimulation.js [legitCount] [oversizeCount] [burstCount] [oversizeSize]`, once with `Defences.enabled: true` and once with `false`, to compare legitimate-served and abusive-rejected rates.
