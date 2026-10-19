@@ -14,13 +14,13 @@ async function main() {
         LoadBalancingAlgorithm: Utils.AlgorithmStr[1],
         NoServers: 10,
         Replicas: 3,
-        MaxNoSessionsPerServer: 10,
-        MinNoSessionsPerServer: 1,
+        MaxNoSessionsPerServer: 100,
+        MinNoSessionsPerServer: 30,
         MaxProcessingTime: 30, //30 seconds
         MinProcessingTime: 2, //2 seconds
         NoDatastores: 2,
-        MaxDatastoreSpace: 1677216, //1GB
-        MinDatastoreSpace: 1677210, //100MB
+        MaxDatastoreSpace: 167721600, //1GB
+        MinDatastoreSpace: 167721000, //100MB
         MaxSizeRequestPayload: 100, //100MB
         MinSizeRequestPayload: 10, //1MB
     }

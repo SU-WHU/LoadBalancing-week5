@@ -3,32 +3,41 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 
-// 在另一个终端启动 MainTerminal.js 后运行：node RequestSimulation.js
-// 可选参数：每档发送时长(ms)、单次请求超时(ms)
-// 示例：node RequestSimulation.js 10000 5000
+// Start MainTerminal.js in another terminal, then run: node RequestSimulation.js
+// Optional arguments: batch size, sending duration per stage (ms), request timeout (ms).
+// Allowed batch sizes: 10, 100, 1000, 10000, 100000. Default: 10.
+// Example: node RequestSimulation.js 1000 (1000 requests per batch, 10 seconds per stage).
+// Example: node RequestSimulation.js 1000 10000 5000
 const intervals = [500, 450, 400, 350, 300, 250, 200, 150, 100, 50, 40, 30, 20, 15, 10, 5, 1];
-const batchSize = 10;
-const durationMs = Number(process.argv[2] ?? 30000);
-const timeoutMs = Number(process.argv[3] ?? 35000);
+const allowedBatchSizes = [10, 100, 1000, 10000, 100000];
+const batchSize = Number(process.argv[2] ?? 10);
+const durationMs = Number(process.argv[3] ?? 10000);
+const timeoutMs = Number(process.argv[4] ?? 35000);
+
+if (!allowedBatchSizes.includes(batchSize)) {
+    console.error(`Batch size must be one of: ${allowedBatchSizes.join(', ')}.`);
+    process.exit(1);
+}
 
 for (const [name, value] of [['durationMs', durationMs], ['timeoutMs', timeoutMs]]) {
     if (!Number.isInteger(value) || value < 1 || value > 2147483647) {
-        console.error(`${name} 必须是 1 到 2147483647 之间的整数。`);
+        console.error(`${name} must be an integer between 1 and 2147483647.`);
         process.exit(1);
     }
 }
 
-// 使用 IPv4，与 LoadBalancer.js 的监听地址保持一致。
+// Use IPv4 to match the listening address in LoadBalancer.js.
 const target = 'http://localhost:8080/request';
 const agent = new http.Agent({ keepAlive: true, maxSockets: Infinity });
 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-const outputPath = fileURLToPath(new URL(`RequestSimulation-${timestamp}.csv`, import.meta.url));
+// Include the UTC date and time, followed by the number of requests per batch.
+const outputPath = fileURLToPath(new URL(`RequestSimulation-${timestamp}-${batchSize}.csv`, import.meta.url));
 const columns = ['intervalMs', 'batchSize', 'sendDurationMs', 'sent', 'success', 'failed',
     'successRatePercent', 'failureRatePercent', 'denied', 'httpErrors',
     'networkErrors', 'timeouts', 'unexpectedResponses', 'actualRequestsPerSecond'];
 let stopping = false;
 process.on('SIGINT', () => {
-    if (!stopping) console.log('\n停止发送，等待已发出的请求完成并保存结果……');
+    if (!stopping) console.log('\nStopping new requests; waiting for pending requests to finish and saving results...');
     stopping = true;
 });
 
@@ -65,12 +74,12 @@ function runStage(intervalMs) {
                 completeStage();
             };
 
-            // 不等待上一个请求返回，保证慢响应不会将发送过程串行化。
+            // Send requests without waiting for earlier responses to complete.
             const request = http.get(target, { agent, family: 4 }, (response) => {
                 let body = '';
                 response.setEncoding('utf8');
                 response.on('data', (chunk) => {
-                    // 服务返回短文本；限制缓存，避免意外大响应占用过多内存。
+                    // Expect short text responses; limit buffering to bound memory usage.
                     if (body.length < 65536) body += chunk.slice(0, 65536 - body.length);
                 });
                 response.on('end', () => {
@@ -88,14 +97,14 @@ function runStage(intervalMs) {
                 response.on('error', () => finish('networkErrors'));
             });
             request.on('error', () => finish('networkErrors'));
-            // 总耗时超时，而非仅检测 socket 空闲时间。
+            // Enforce a total request deadline, including time when the socket is active.
             deadline = setTimeout(() => {
                 finish('timeouts');
                 request.destroy();
             }, timeoutMs);
         }
 
-        // 每次定时触发并发发送一批请求，每条请求单独统计结果。
+        // Send a concurrent batch on each tick and count each request separately.
         function sendBatch() {
             for (let i = 0; i < batchSize; i++) sendRequest();
         }
@@ -120,14 +129,14 @@ function runStage(intervalMs) {
 
 async function main() {
     writeFileSync(outputPath, `${columns.join(',')}\n`, 'utf8');
-    console.log(`目标：${target}；每档发送 ${durationMs} ms；请求超时 ${timeoutMs} ms。`);
-    console.log('成功 = HTTP 2xx 且包含 ACCESS GRANTED；其他结果均计为失败。');
-    console.log('各档连续运行，服务器和数据库状态会延续；毫秒定时受事件循环精度影响。');
-    console.log(`结果文件：${outputPath}`);
+    console.log(`Target: ${target}; batch size: ${batchSize}; sending duration per stage: ${durationMs} ms; request timeout: ${timeoutMs} ms.`);
+    console.log('Success = HTTP 2xx with ACCESS GRANTED in the response; all other outcomes count as failures.');
+    console.log('Stages run consecutively and share server and database state; timer precision depends on the event loop.');
+    console.log(`Results file: ${outputPath}`);
     try {
         for (const intervalMs of intervals) {
             if (stopping) break;
-            console.log(`\n开始：每 ${intervalMs} ms 并发发送 ${batchSize} 条请求……`);
+            console.log(`\nStarting: send ${batchSize} concurrent requests every ${intervalMs} ms...`);
             const result = await runStage(intervalMs);
             appendFileSync(outputPath, `${columns.map((key) => result[key]).join(',')}\n`, 'utf8');
             console.table([result]);
@@ -135,10 +144,10 @@ async function main() {
     } finally {
         agent.destroy();
     }
-    console.log(`\n统计已保存：${outputPath}`);
+    console.log(`\nResults saved: ${outputPath}`);
 }
 
 main().catch((error) => {
-    console.error('模拟失败：', error.message);
+    console.error('Simulation failed:', error.message);
     process.exitCode = 1;
 });

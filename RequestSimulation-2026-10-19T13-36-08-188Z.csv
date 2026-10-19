@@ -1,3 +1,0 @@
-intervalMs,batchSize,sendDurationMs,sent,success,failed,successRatePercent,failureRatePercent,denied,httpErrors,networkErrors,timeouts,unexpectedResponses,actualRequestsPerSecond
-500,10,30000.17,600,9,591,1.5,98.5,591,0,0,0,0,20
-450,10,30000.68,670,0,670,0,100,670,0,0,0,0,22.33
