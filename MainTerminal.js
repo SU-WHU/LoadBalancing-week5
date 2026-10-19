@@ -23,10 +23,10 @@ async function main() {
         MinDatastoreSpace: 1048576, //100MB
         MaxSizeRequestPayload: 100, //100KB
         MinSizeRequestPayload: 10, //10KB
-        FaultInjection: { enabled: true, serverId: "S0", failAfterMs: 10000, downDurationMs: 8000 },
+        FaultInjection: { enabled: false, serverId: "S0", failAfterMs: 10000, downDurationMs: 8000 },
         HealthCheck: { intervalMs: 1000 },
         BackendTimeoutMs: 5000,
-        Defences: { enabled: false, maxPayloadSize: 100, rateLimitWindowMs: 1000, rateLimitMaxRequests: 100 },
+        Defences: { enabled: true, maxPayloadSize: 100, rateLimitWindowMs: 1000, rateLimitMaxRequests: 100 },
     }
 
     prompt()
